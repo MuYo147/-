@@ -2,7 +2,7 @@
 -- 配置区（用户需要修改这里）
 local CONFIG = {
     VERSION = "1.1.0", -- 当前脚本版本，每次更新必须增大此值
-    UPDATE_URL = "https://raw.githubusercontent.com/你的用户名/你的仓库名/main/我是大主公云更新版.lua", -- 新版本脚本的直链
+    UPDATE_URL = "https://github.com/MuYo147/-/main/我是大主公云更新版.lua", -- 新版本脚本的直链
     CHECK_INTERVAL = 1, -- 更新检查间隔（小时），默认1小时检查一次
     ENABLE_UPDATE = true -- 是否启用云更新功能
 }
