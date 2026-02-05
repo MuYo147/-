@@ -1,10 +1,10 @@
 -- ==================== 云更新模块开始 ====================
 -- 配置区（用户需要修改这里）
 local CONFIG = {
-    VERSION = "1.1.0", -- 当前脚本版本，每次更新必须增大此值
-    UPDATE_URL = "https://raw.githubusercontent.com/MuYo147/-/main/我是大主公云更新版.lua", -- 新版本脚本的直链
-    CHECK_INTERVAL = 1, -- 更新检查间隔（小时），默认1小时检查一次
-    ENABLE_UPDATE = true -- 是否启用云更新功能
+    VERSION = "1.0.1", -- 当前脚本版本，每次更新必须增大此值
+    UPDATE_URL = "https://raw.githubusercontent.com/MuYo147/-/main/我是大主公云更新版.lua", -- 【必须修改为此格式】
+    CHECK_INTERVAL = 1, -- 更新检查间隔（小时）
+    ENABLE_UPDATE = true
 }
 
 -- 内部状态，无需修改
@@ -34,7 +34,7 @@ function HttpGet(url)
         -- 方式3：备用方案，处理常见平台链接
         if url:find("githubusercontent") then
             -- 如果是GitHub Raw链接，尝试添加备用访问方式
-            local altUrl = url:gsub("raw%.githubusercontent", "raw")
+            local altUrl = url:gsub("^https://github%.com/", "https://raw.githubusercontent.com/"):gsub("/blob/", "/")
             local altResult = gg.httpGet(altUrl)
             if altResult and altResult ~= "" then
                 return altResult
@@ -62,6 +62,204 @@ function CompareVersion(v1, v2)
     if not m1 or not m2 then return 0 end
     
     if m1 > m2 then return 1
+    elseif m1 < m2 then return -1
+    elseif mi1 > mi2 then return 1
+    elseif mi1 < mi2 then return -1
+    elseif p1 > p2 then return 1
+    elseif p1 < p2 then return -1
+    else return 0 end
+end
+
+-- 从脚本内容中提取版本号
+function ExtractVersionFromScript(scriptContent)
+    if not scriptContent then return nil end
+    
+    -- 匹配 VERSION = "x.x.x" 格式
+    local version = scriptContent:match('VERSION%s*=%s*["\'](%d+%.%d+%.%d+)["\']')
+    
+    -- 如果没找到，尝试匹配其他常见格式
+    if not version then
+        version = scriptContent:match('version%s*=%s*["\'](%d+%.%d+%.%d+)["\']')
+    end
+    
+    return version
+end
+
+-- 检查更新
+function CheckForUpdate()
+    if not CONFIG.ENABLE_UPDATE then
+        return false
+    end
+    
+    local currentTime = os.time()
+    -- 检查是否到达检查间隔
+    if currentTime - updateData.lastCheckTime < CONFIG.CHECK_INTERVAL * 3600 then
+        return false
+    end
+    
+    updateData.lastCheckTime = currentTime
+    gg.toast("正在检查更新...")
+    
+    -- 获取远程脚本
+    local remoteScript = HttpGet(CONFIG.UPDATE_URL)
+    if not remoteScript then
+        gg.toast("更新检查失败，无法连接服务器")
+        return false
+    end
+    
+    -- 提取远程版本号
+    local remoteVersion = ExtractVersionFromScript(remoteScript)
+    if not remoteVersion then
+        gg.toast("更新检查失败，无效的脚本格式")
+        return false
+    end
+    
+    -- 比较版本
+    local comparison = CompareVersion(remoteVersion, CONFIG.VERSION)
+    
+    if comparison > 0 then
+        -- 有新版本
+        gg.toast("发现新版本 v" .. remoteVersion)
+        
+        -- 弹出更新提示
+        local updateChoice = gg.choice({
+            "立即更新到 v" .. remoteVersion,
+            "本次忽略",
+            "不再提示"
+        }, nil, "发现新版本 v" .. remoteVersion .. "\n当前版本 v" .. CONFIG.VERSION)
+        
+        if updateChoice == 1 then
+            return PerformUpdate(remoteScript, remoteVersion)
+        elseif updateChoice == 2 then
+            gg.toast("已忽略本次更新")
+            return false
+        elseif updateChoice == 3 then
+            CONFIG.ENABLE_UPDATE = false
+            gg.toast("已关闭自动更新")
+            return false
+        end
+    else
+        gg.toast("当前已是最新版本 v" .. CONFIG.VERSION)
+        return false
+    end
+end
+
+-- 执行更新
+function PerformUpdate(newScript, newVersion)
+    gg.toast("正在下载更新...")
+    
+    -- 生成临时文件名
+    local tempFile = gg.EXT_STORAGE .. "/我是大主公一键启动_temp.lua"
+    
+    -- 写入新脚本
+    local file, err = io.open(tempFile, "w")
+    if not file then
+        gg.alert("更新失败：无法创建临时文件\n" .. (err or ""))
+        return false
+    end
+    
+    file:write(newScript)
+    file:close()
+    
+    -- 验证文件
+    local verifyFile = io.open(tempFile, "r")
+    if not verifyFile then
+        gg.alert("更新失败：文件验证错误")
+        return false
+    end
+    
+    local firstLine = verifyFile:read()
+    verifyFile:close()
+    
+    if not firstLine or not firstLine:find("function") then
+        gg.alert("更新失败：文件内容无效")
+        os.remove(tempFile)
+        return false
+    end
+    
+    -- 更新成功，提示用户
+    gg.alert("更新下载完成！\n\n新版本: v" .. newVersion .. "\n\n请手动重启脚本以应用更新。\n\n临时文件位置:\n" .. tempFile)
+    
+    -- 提供重启选项
+    local restartChoice = gg.choice({
+        "知道了，稍后重启",
+        "复制文件路径到剪贴板"
+    }, nil, "更新下载完成")
+    
+    if restartChoice == 2 then
+        -- 复制文件路径到剪贴板
+        gg.copyText(tempFile)
+        gg.toast("文件路径已复制到剪贴板")
+    end
+    
+    return true
+end
+
+-- 手动检查更新（添加到菜单）
+function ManualCheckUpdate()
+    CONFIG.ENABLE_UPDATE = true
+    updateData.lastCheckTime = 0
+    gg.toast("正在手动检查更新...")
+    
+    -- 强制立即检查
+    local currentTime = os.time()
+    updateData.lastCheckTime = currentTime - CONFIG.CHECK_INTERVAL * 3600 - 1
+    
+    CheckForUpdate()
+end
+
+-- 初始化更新模块
+function InitUpdateModule()
+    if CONFIG.ENABLE_UPDATE then
+        -- 每秒检查一次是否需要检查更新
+        local initCheckDone = false
+        local initCheckTime = os.time()
+        
+        while not initCheckDone do
+            local currentTime = os.time()
+            if currentTime - initCheckTime > 5 then
+                -- 等待5秒后检查更新
+                CheckForUpdate()
+                initCheckDone = true
+            end
+            gg.sleep(1000)
+        end
+    end
+end
+
+-- ==================== 云更新模块结束 ====================
+
+-- 初始化云更新模块
+InitUpdateModule()
+
+function split(szFullString, szSeparator) 
+    local nFindStartIndex = 1 
+    local nSplitIndex = 1 
+    local nSplitArray = {} 
+    while true do 
+        local nFindLastIndex = string.find(szFullString, szSeparator, nFindStartIndex) 
+        if not nFindLastIndex then 
+            nSplitArray[nSplitIndex] = string.sub(szFullString, nFindStartIndex, string.len(szFullString)) 
+            break 
+        end 
+        nSplitArray[nSplitIndex] = string.sub(szFullString, nFindStartIndex, nFindLastIndex - 1) 
+        nFindStartIndex = nFindLastIndex + string.len(szSeparator) 
+        nSplitIndex = nSplitIndex + 1 
+    end 
+    return nSplitArray 
+end 
+
+function xgxc(szpy, qmxg) 
+    local xgsl = 0  -- 添加局部变量初始化
+    for x = 1, #(qmxg) do 
+        local xgpy = szpy + qmxg[x]["offset"] 
+        local xglx = qmxg[x]["type"] 
+        local xgsz = qmxg[x]["value"] 
+        local xgdj = qmxg[x]["freeze"] 
+        if xgdj == nil or xgdj == "" then 
+            gg.setValues({[1] = {address = xgpy, flags = xglx, value = xgsz}})
+        else 
+            gg.addListItems({[1] = {address = xgp    if m1 > m2 then return 1
     elseif m1 < m2 then return -1
     elseif mi1 > mi2 then return 1
     elseif mi1 < mi2 then return -1
